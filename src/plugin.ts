@@ -4,6 +4,7 @@ import type { ServerResponse } from "node:http";
 import { build } from "vite";
 import type { Plugin, PreviewServer, Rollup } from "vite";
 import { joinClientUrl, renderClientScript } from "./client";
+import { resolveCorsHeaders, type PreviewCors } from "./cors";
 import { formatBuildError } from "./error";
 import { injectSnippet, resolveHtmlFile, stripBase } from "./inject";
 import { resolveOptions, type PreviewWatchOptions } from "./options";
@@ -81,10 +82,14 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
       // would immediately reload away the error overlay and re-serve the stale
       // bundle. Track failures per cycle instead.
       let buildFailed = false;
+      let cycleStart = 0;
+      let lastError: unknown = null;
       watcher.on("event", (event) => {
         switch (event.code) {
           case "START":
             buildFailed = false;
+            lastError = null;
+            cycleStart = Date.now();
             break;
           case "BUNDLE_END":
             // Per rollup docs: close the result so build plugins get their
@@ -93,6 +98,7 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
             break;
           case "ERROR":
             buildFailed = true;
+            lastError = event.error;
             // ERROR events can also carry a (partial) build result to close.
             void event.result?.close();
             // Keep the preview alive and surface the failure in the browser.
@@ -102,14 +108,33 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
             }
             break;
           case "END":
-            // Successful (re)build: reload, which also clears any overlay.
+            // Successful (re)build: reload, which also clears any overlay. In
+            // manual mode we still emit "reload" - the client shows a toast
+            // instead of reloading, so the decision stays client-side.
             if (opts.reload && !buildFailed) send("reload");
+            // Fire the server-side hook after every cycle, regardless of the
+            // reload setting. A user exception here must not take down the
+            // preview server.
+            if (opts.onRebuild) {
+              try {
+                opts.onRebuild({
+                  ok: !buildFailed,
+                  error: buildFailed ? lastError : null,
+                  durationMs: Date.now() - cycleStart,
+                });
+              } catch (err) {
+                console.error(`[${PLUGIN_NAME}] onRebuild threw:`, err);
+              }
+            }
             break;
         }
       });
 
       if (opts.reload) {
-        const snippet = renderClientScript(joinClientUrl(base, opts.clientPath));
+        const snippet = renderClientScript(
+          joinClientUrl(base, opts.clientPath),
+          opts.reload === "manual" ? "manual" : "auto",
+        );
 
         // SSE endpoint the injected client subscribes to.
         server.middlewares.use((req, res, next) => {
@@ -117,10 +142,15 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
           if (stripped === null) return next();
           if (stripped.split("?")[0] !== opts.clientPath) return next();
 
-          // Mirror the preview server's configured headers here too, with our
-          // SSE headers last so they win.
+          // Mirror the preview server's configured headers and CORS here too,
+          // with our SSE headers last so they win.
+          const corsHeaders = resolveCorsHeaders(
+            config.preview.cors as PreviewCors,
+            req.headers.origin,
+          );
           res.writeHead(200, {
             ...previewHeaders,
+            ...corsHeaders,
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache, no-transform",
             Connection: "keep-alive",
@@ -157,9 +187,16 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
 
           const body = injectSnippet(html, snippet);
           res.statusCode = 200;
-          // Mirror the preview server's configured response headers, then set
-          // our own content-type/cache last so they win.
+          // Mirror the preview server's configured response headers and CORS,
+          // then set our own content-type/cache last so they win.
           for (const [name, value] of Object.entries(previewHeaders)) {
+            res.setHeader(name, value);
+          }
+          const corsHeaders = resolveCorsHeaders(
+            config.preview.cors as PreviewCors,
+            req.headers.origin,
+          );
+          for (const [name, value] of Object.entries(corsHeaders)) {
             res.setHeader(name, value);
           }
           res.setHeader("Content-Type", "text/html; charset=utf-8");

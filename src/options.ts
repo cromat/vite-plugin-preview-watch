@@ -1,19 +1,40 @@
 import type { LogLevel, Rollup } from "vite";
 
+/** Outcome of one background rebuild cycle, passed to `onRebuild`. */
+export interface RebuildInfo {
+  /** Whether the cycle finished without a build error. */
+  ok: boolean;
+  /** The build error for failed cycles, `null` otherwise. */
+  error: unknown;
+  /** Wall-clock duration of the cycle in milliseconds. */
+  durationMs: number;
+}
+
 /**
  * Options for {@link previewWatch}. Every field is optional; see
  * {@link resolveOptions} for the defaults.
  */
 export interface PreviewWatchOptions {
   /**
-   * Automatically full-page reload connected preview tabs after every
-   * successful rebuild. When `false`, the plugin still rebuilds `dist/` on
-   * source changes but does not inject the reload client and does not touch
-   * served HTML.
+   * What to do in connected preview tabs after a successful rebuild:
+   *
+   * - `true` - full-page reload automatically;
+   * - `"manual"` - show a small "Rebuilt - click to reload" toast instead of
+   *   reloading, so in-page state (scroll, form input) survives until you opt
+   *   in;
+   * - `false` - the plugin still rebuilds `dist/` on source changes but does
+   *   not inject the client and does not touch served HTML.
    *
    * @default true
    */
-  reload?: boolean;
+  reload?: boolean | "manual";
+
+  /**
+   * Called on the server after every rebuild cycle, successful or not. Runs
+   * regardless of the `reload` setting. Exceptions thrown here are caught and
+   * logged so they cannot take down the preview server.
+   */
+  onRebuild?: (info: RebuildInfo) => void;
 
   /**
    * Path (relative to the resolved `base`) of the internal Server-Sent Events
@@ -60,7 +81,9 @@ export interface PreviewWatchOptions {
 
 /** Fully-defaulted options, produced by {@link resolveOptions}. */
 export interface ResolvedPreviewWatchOptions {
-  reload: boolean;
+  /** `true` is normalized to `"auto"`. */
+  reload: "auto" | "manual" | false;
+  onRebuild: ((info: RebuildInfo) => void) | null;
   clientPath: string;
   logLevel: LogLevel;
   overlay: boolean;
@@ -70,14 +93,17 @@ export interface ResolvedPreviewWatchOptions {
 
 /**
  * Apply defaults to user-supplied options. `clientPath` is normalized to start
- * with a single leading slash so it can be compared against request pathnames.
+ * with a single leading slash so it can be compared against request pathnames;
+ * `reload: true` is normalized to `"auto"`.
  */
 export function resolveOptions(
   options: PreviewWatchOptions = {},
 ): ResolvedPreviewWatchOptions {
   const clientPath = options.clientPath ?? "/__preview_watch";
+  const reload = options.reload ?? true;
   return {
-    reload: options.reload ?? true,
+    reload: reload === true ? "auto" : reload,
+    onRebuild: options.onRebuild ?? null,
     clientPath: "/" + clientPath.replace(/^\/+/, ""),
     logLevel: options.logLevel ?? "warn",
     overlay: options.overlay ?? true,

@@ -56,11 +56,22 @@ On `vite preview` startup the plugin:
    `outDir` the preview server serves from.
 2. Registers a Server-Sent Events endpoint and injects a tiny client script into
    served HTML documents.
-3. On every successful rebuild, pushes a `reload` event; the client does a
-   `location.reload()`.
+3. On every successful rebuild, pushes a `reload` event. In the default
+   (`reload: true`) mode the client does a `location.reload()`; in
+   `reload: "manual"` mode it shows a small toast instead so in-page state
+   survives until you click it.
 4. When a rebuild fails, pushes a `build-error` event; the client shows a
    full-screen overlay with the error (plugin, message, file location, and code
    frame). The overlay clears on the next successful rebuild.
+5. If the SSE connection drops and later reconnects (for example after the
+   preview server restarts, when the bundle may have changed while the tab was
+   not listening), the client treats it like a fresh rebuild - auto-reloading in
+   the default mode, or showing the toast in `manual` mode.
+
+The plugin's own responses (injected HTML and the SSE endpoint) mirror the
+preview server's `preview.headers` and `preview.cors` configuration, so they
+stay consistent with the rest of the preview server. A server-side `onRebuild`
+hook, if provided, runs after every rebuild cycle.
 
 Everything is torn down when the preview server closes.
 
@@ -68,9 +79,20 @@ Everything is torn down when the preview server closes.
 
 ```ts
 previewWatch({
-  // Full-page reload open tabs after each rebuild. When false, the plugin still
-  // rebuilds on change but injects nothing and never reloads.
+  // What to do in open tabs after each rebuild:
+  // - true     -> full-page reload automatically;
+  // - "manual" -> show a "Rebuilt - click to reload" toast instead, so in-page
+  //               state (scroll, form input) survives until you opt in;
+  // - false    -> still rebuilds on change but injects nothing and never
+  //               reloads.
   reload: true,
+
+  // Server-side hook run after every rebuild cycle, successful or not, and
+  // regardless of the reload setting. Exceptions thrown here are caught and
+  // logged so they cannot take down the preview server.
+  onRebuild: (info) => {
+    // info: { ok: boolean; error: unknown; durationMs: number }
+  },
 
   // Show a full-screen overlay in the browser when a rebuild fails. No effect
   // when reload is false.
@@ -93,7 +115,8 @@ previewWatch({
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `reload` | `boolean` | `true` | Auto full-page reload after each rebuild. |
+| `reload` | `boolean \| "manual"` | `true` | `true` auto full-page reloads after each rebuild; `"manual"` shows a click-to-reload toast; `false` disables injection. |
+| `onRebuild` | `(info: RebuildInfo) => void` | none | Server-side hook run after every rebuild cycle. |
 | `overlay` | `boolean` | `true` | Show a browser overlay on build failure. |
 | `clientPath` | `string` | `"/__preview_watch"` | SSE endpoint path, relative to `base`. |
 | `logLevel` | `LogLevel` | `"warn"` | Log level of the background build. |
@@ -111,6 +134,9 @@ previewWatch({
   need `clientPath` tuning.
 - The injected HTML response is produced before Vite's internal compression
   middleware, so those specific responses are served uncompressed.
+- Function-style `preview.cors.origin` is not supported: the plugin's own
+  responses cannot call it synchronously, so they carry no CORS headers in that
+  configuration.
 
 ## License
 

@@ -4,7 +4,8 @@ import { resolveOptions } from "../src/options";
 describe("resolveOptions", () => {
   it("applies defaults for an empty object", () => {
     expect(resolveOptions()).toEqual({
-      reload: true,
+      reload: "auto",
+      onRebuild: null,
       clientPath: "/__preview_watch",
       logLevel: "warn",
       overlay: true,
@@ -37,5 +38,22 @@ describe("resolveOptions", () => {
     });
     expect(resolved.logLevel).toBe("silent");
     expect(resolved.watch).toEqual({ exclude: ["**/node_modules/**"] });
+  });
+
+  it("converts reload: true to auto", () => {
+    expect(resolveOptions({ reload: true }).reload).toBe("auto");
+  });
+
+  it("passes through reload: manual", () => {
+    expect(resolveOptions({ reload: "manual" }).reload).toBe("manual");
+  });
+
+  it("passes through reload: false", () => {
+    expect(resolveOptions({ reload: false }).reload).toBe(false);
+  });
+
+  it("passes through onRebuild function", () => {
+    const fn = () => {};
+    expect(resolveOptions({ onRebuild: fn }).onRebuild).toBe(fn);
   });
 });
