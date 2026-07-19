@@ -1,9 +1,10 @@
-import { readFileSync } from "node:fs";
+﻿import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ServerResponse } from "node:http";
 import { build } from "vite";
 import type { Plugin, PreviewServer, Rollup } from "vite";
 import { joinClientUrl, renderClientScript } from "./client";
+import { formatBuildError } from "./error";
 import { injectSnippet, resolveHtmlFile, stripBase } from "./inject";
 import { resolveOptions, type PreviewWatchOptions } from "./options";
 
@@ -44,6 +45,12 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
       const base = config.base;
       const outDirAbs = resolve(config.root, config.build.outDir);
       const isSpa = config.appType !== "mpa";
+      // Configured preview response headers, minus undefined values (setHeader
+      // and writeHead reject those).
+      const previewHeaders: Record<string, string | number | string[]> = {};
+      for (const [name, value] of Object.entries(config.preview.headers ?? {})) {
+        if (value !== undefined) previewHeaders[name] = value;
+      }
 
       // ---- background rebuild -------------------------------------------
       // Re-run the production build in watch mode. This writes into the same
@@ -55,23 +62,50 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
         mode: config.mode,
         configFile: config.configFile,
         logLevel: opts.logLevel,
-        clearScreen: false,
+        clearScreen: opts.clearScreen,
         build: { watch: opts.watch },
       })) as Rollup.RollupWatcher;
 
       // ---- reload wiring -------------------------------------------------
       const clients = new Set<ServerResponse>();
 
-      const notifyReload = (): void => {
+      const send = (event: string, data?: unknown): void => {
+        const payload = data === undefined ? "{}" : JSON.stringify(data);
         for (const client of clients) {
-          client.write("event: reload\ndata: {}\n\n");
+          client.write(`event: ${event}\ndata: ${payload}\n\n`);
         }
       };
 
+      // Rollup emits END after EVERY cycle, including a failed one (ERROR is
+      // followed by END), so END alone must not be treated as success - that
+      // would immediately reload away the error overlay and re-serve the stale
+      // bundle. Track failures per cycle instead.
+      let buildFailed = false;
       watcher.on("event", (event) => {
-        // "END" fires after every successful (re)build. Vite already logs
-        // build errors itself; we simply keep the preview server alive.
-        if (event.code === "END" && opts.reload) notifyReload();
+        switch (event.code) {
+          case "START":
+            buildFailed = false;
+            break;
+          case "BUNDLE_END":
+            // Per rollup docs: close the result so build plugins get their
+            // closeBundle hooks promptly instead of at watcher.close().
+            void event.result?.close();
+            break;
+          case "ERROR":
+            buildFailed = true;
+            // ERROR events can also carry a (partial) build result to close.
+            void event.result?.close();
+            // Keep the preview alive and surface the failure in the browser.
+            // Vite still logs the full error to the terminal itself.
+            if (opts.reload && opts.overlay) {
+              send("build-error", { message: formatBuildError(event.error) });
+            }
+            break;
+          case "END":
+            // Successful (re)build: reload, which also clears any overlay.
+            if (opts.reload && !buildFailed) send("reload");
+            break;
+        }
       });
 
       if (opts.reload) {
@@ -83,7 +117,10 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
           if (stripped === null) return next();
           if (stripped.split("?")[0] !== opts.clientPath) return next();
 
+          // Mirror the preview server's configured headers here too, with our
+          // SSE headers last so they win.
           res.writeHead(200, {
+            ...previewHeaders,
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache, no-transform",
             Connection: "keep-alive",
@@ -120,6 +157,11 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
 
           const body = injectSnippet(html, snippet);
           res.statusCode = 200;
+          // Mirror the preview server's configured response headers, then set
+          // our own content-type/cache last so they win.
+          for (const [name, value] of Object.entries(previewHeaders)) {
+            res.setHeader(name, value);
+          }
           res.setHeader("Content-Type", "text/html; charset=utf-8");
           res.setHeader("Cache-Control", "no-cache");
           res.end(req.method === "HEAD" ? undefined : body);

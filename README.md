@@ -14,6 +14,8 @@ Implements the long-standing request in
 
 - Zero runtime dependencies (`vite` is a peer dependency).
 - Full-page reload over Server-Sent Events - no client library to install.
+- Build failures surface as a full-screen overlay in the browser instead of
+  silently leaving the stale bundle on screen.
 - Inert during `vite dev` and `vite build`; all behaviour lives in the preview
   server.
 
@@ -56,6 +58,9 @@ On `vite preview` startup the plugin:
    served HTML documents.
 3. On every successful rebuild, pushes a `reload` event; the client does a
    `location.reload()`.
+4. When a rebuild fails, pushes a `build-error` event; the client shows a
+   full-screen overlay with the error (plugin, message, file location, and code
+   frame). The overlay clears on the next successful rebuild.
 
 Everything is torn down when the preview server closes.
 
@@ -67,12 +72,19 @@ previewWatch({
   // rebuilds on change but injects nothing and never reloads.
   reload: true,
 
+  // Show a full-screen overlay in the browser when a rebuild fails. No effect
+  // when reload is false.
+  overlay: true,
+
   // Path (relative to `base`) of the internal SSE endpoint. Change only on a
   // collision with a real route.
   clientPath: "/__preview_watch",
 
   // Log level for the background build. Quiet by default.
   logLevel: "warn",
+
+  // Let the background build clear the terminal on each rebuild.
+  clearScreen: false,
 
   // Rollup watch options forwarded to build.watch (e.g. exclude globs).
   watch: {},
@@ -82,8 +94,10 @@ previewWatch({
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `reload` | `boolean` | `true` | Auto full-page reload after each rebuild. |
+| `overlay` | `boolean` | `true` | Show a browser overlay on build failure. |
 | `clientPath` | `string` | `"/__preview_watch"` | SSE endpoint path, relative to `base`. |
 | `logLevel` | `LogLevel` | `"warn"` | Log level of the background build. |
+| `clearScreen` | `boolean` | `false` | Let the background build clear the terminal. |
 | `watch` | `Rollup.WatcherOptions` | `{}` | Forwarded to `build.watch`. |
 
 ## Limitations

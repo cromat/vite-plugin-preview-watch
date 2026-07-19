@@ -23,6 +23,17 @@ describe("renderClientScript", () => {
     expect(script.endsWith("</script>")).toBe(true);
   });
 
+  it("handles a build-error event with a distinct event name", () => {
+    const script = renderClientScript("/__preview_watch");
+    expect(script).toContain(`"build-error"`);
+    // Must not listen on EventSource's built-in "error" event.
+    expect(script).not.toContain(`addEventListener("error"`);
+    expect(script).toContain("data-vite-preview-watch-error");
+    // Uses textContent (not innerHTML) so build output cannot inject markup.
+    expect(script).toContain("textContent");
+    expect(script).not.toContain("innerHTML");
+  });
+
   it("JSON-encodes the url so quotes cannot break out of the string", () => {
     const script = renderClientScript('/a"b');
     expect(script).toContain('new EventSource("/a\\"b")');

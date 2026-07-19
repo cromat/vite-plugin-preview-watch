@@ -7,8 +7,16 @@ describe("resolveOptions", () => {
       reload: true,
       clientPath: "/__preview_watch",
       logLevel: "warn",
+      overlay: true,
+      clearScreen: false,
       watch: {},
     });
+  });
+
+  it("allows disabling the error overlay and toggling clearScreen", () => {
+    const resolved = resolveOptions({ overlay: false, clearScreen: true });
+    expect(resolved.overlay).toBe(false);
+    expect(resolved.clearScreen).toBe(true);
   });
 
   it("allows disabling reload", () => {

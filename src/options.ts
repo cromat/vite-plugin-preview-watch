@@ -33,6 +33,23 @@ export interface PreviewWatchOptions {
   logLevel?: LogLevel;
 
   /**
+   * Show a full-screen overlay in the browser when a rebuild fails, instead of
+   * silently keeping the previous bundle on screen. The overlay is cleared on
+   * the next successful rebuild. Has no effect when {@link reload} is `false`.
+   *
+   * @default true
+   */
+  overlay?: boolean;
+
+  /**
+   * Let the background build clear the terminal on each rebuild. Off by default
+   * so the preview server's own output stays visible.
+   *
+   * @default false
+   */
+  clearScreen?: boolean;
+
+  /**
    * Rollup watch options forwarded to the background build (e.g. `exclude`,
    * `chokidar`). Merged into `build.watch`.
    *
@@ -46,6 +63,8 @@ export interface ResolvedPreviewWatchOptions {
   reload: boolean;
   clientPath: string;
   logLevel: LogLevel;
+  overlay: boolean;
+  clearScreen: boolean;
   watch: Rollup.WatcherOptions;
 }
 
@@ -61,6 +80,8 @@ export function resolveOptions(
     reload: options.reload ?? true,
     clientPath: "/" + clientPath.replace(/^\/+/, ""),
     logLevel: options.logLevel ?? "warn",
+    overlay: options.overlay ?? true,
+    clearScreen: options.clearScreen ?? false,
     watch: options.watch ?? {},
   };
 }
