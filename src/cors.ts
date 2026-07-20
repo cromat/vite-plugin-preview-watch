@@ -16,7 +16,16 @@ function originMatches(
   requestOrigin: string,
 ): boolean {
   if (typeof origin === "string") return origin === requestOrigin;
-  if (origin instanceof RegExp) return origin.test(requestOrigin);
+  if (origin instanceof RegExp) {
+    // A user regex with the `g` or `y` flag is stateful: `test()` advances
+    // `lastIndex`, so consecutive requests would alternate between matching
+    // and not matching. Reset it around the call to stay stateless.
+    const stateful = origin.global || origin.sticky;
+    if (stateful) origin.lastIndex = 0;
+    const matched = origin.test(requestOrigin);
+    if (stateful) origin.lastIndex = 0;
+    return matched;
+  }
   return false;
 }
 

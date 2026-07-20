@@ -26,6 +26,30 @@ describe("resolveCorsHeaders", () => {
     });
   });
 
+  it("matches consistently across repeated calls for a global-flag regex", () => {
+    // Regression: `g`/`y` regexes are stateful (`test()` advances lastIndex),
+    // which used to make consecutive requests alternate match/no-match.
+    const cors = { origin: /example$/g };
+    for (let i = 0; i < 4; i++) {
+      expect(resolveCorsHeaders(cors, "http://a.example")).toEqual({
+        "Access-Control-Allow-Origin": "http://a.example",
+        "Vary": "Origin",
+      });
+    }
+  });
+
+  it("leaves a caller's sticky regex usable and matches consistently", () => {
+    const origin = /^http:\/\/a\.example$/y;
+    const cors = { origin };
+    for (let i = 0; i < 3; i++) {
+      expect(resolveCorsHeaders(cors, "http://a.example")).toEqual({
+        "Access-Control-Allow-Origin": "http://a.example",
+        "Vary": "Origin",
+      });
+    }
+    expect(origin.lastIndex).toBe(0);
+  });
+
   it("returns wildcard for {} (origin defaults to '*')", () => {
     expect(resolveCorsHeaders({}, "http://a.example")).toEqual({
       "Access-Control-Allow-Origin": "*",
