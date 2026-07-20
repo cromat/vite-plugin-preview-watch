@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { join, sep } from "node:path";
-import { injectSnippet, resolveHtmlFile, stripBase } from "../src/inject";
+import {
+  injectSnippet,
+  isSpaAppType,
+  resolveHtmlFile,
+  stripBase,
+} from "../src/inject";
 
 describe("stripBase", () => {
   it("returns the url unchanged for root base", () => {
@@ -21,6 +26,24 @@ describe("stripBase", () => {
 
   it("returns null for urls outside the base", () => {
     expect(stripBase("/other/foo", "/app/")).toBeNull();
+  });
+});
+
+describe("isSpaAppType", () => {
+  it("treats undefined (Vite's default) as SPA", () => {
+    expect(isSpaAppType(undefined)).toBe(true);
+  });
+
+  it("treats 'spa' as SPA", () => {
+    expect(isSpaAppType("spa")).toBe(true);
+  });
+
+  it("treats 'mpa' as not SPA (explicit *.html only)", () => {
+    expect(isSpaAppType("mpa")).toBe(false);
+  });
+
+  it("treats 'custom' as not SPA (no index.html fallback)", () => {
+    expect(isSpaAppType("custom")).toBe(false);
   });
 });
 
@@ -51,6 +74,16 @@ describe("resolveHtmlFile", () => {
 
   it("returns null for extensionless routes when not an SPA", () => {
     expect(resolveHtmlFile("/dashboard", outDir, false)).toBeNull();
+  });
+
+  it("does not fall back to index.html for appType 'custom'", () => {
+    const spa = isSpaAppType("custom");
+    // Extensionless route: no SPA fallback for custom.
+    expect(resolveHtmlFile("/dashboard", outDir, spa)).toBeNull();
+    // Explicit *.html still resolves, exactly as for MPA.
+    expect(resolveHtmlFile("/about.html", outDir, spa)).toBe(
+      join(outDir, "about.html"),
+    );
   });
 
   it("returns null for non-html assets", () => {

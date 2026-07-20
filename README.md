@@ -68,7 +68,14 @@ On `vite preview` startup the plugin:
 5. If the SSE connection drops and later reconnects (for example after the
    preview server restarts, when the bundle may have changed while the tab was
    not listening), the client treats it like a fresh rebuild - auto-reloading in
-   the default mode, or showing the toast in `manual` mode.
+   the default mode, or showing the toast in `manual` mode. Set `reconnect:
+   false` to turn this off, so a preview server that is deliberately restarted
+   often does not reload open tabs.
+
+The build-error overlay carries a small "Reload" button in its top-right corner
+so you can force a reload without opening the DevTools console. The error text
+itself is always rendered as `textContent` (never `innerHTML`), so build output
+can never inject markup into the page.
 
 The plugin's own responses (injected HTML and the SSE endpoint) mirror the
 preview server's `preview.headers` and `preview.cors` configuration, so they
@@ -97,8 +104,15 @@ previewWatch({
   },
 
   // Show a full-screen overlay in the browser when a rebuild fails. No effect
-  // when reload is false.
+  // when reload is false. The overlay includes a small "Reload" button.
   overlay: true,
+
+  // React to SSE reconnection after a dropped connection. true treats a
+  // reconnect as a fresh rebuild (reload / toast) because the server may have
+  // restarted with a changed bundle; false makes reconnection a no-op - handy
+  // when the preview server is restarted often on purpose. No effect when
+  // reload is false.
+  reconnect: true,
 
   // Path (relative to `base`) of the internal SSE endpoint. Change only on a
   // collision with a real route.
@@ -119,7 +133,8 @@ previewWatch({
 | --- | --- | --- | --- |
 | `reload` | `boolean \| "manual"` | `true` | `true` auto full-page reloads after each rebuild; `"manual"` shows a click-to-reload toast; `false` disables injection. |
 | `onRebuild` | `(info: RebuildInfo) => void` | none | Server-side hook run after every rebuild cycle. |
-| `overlay` | `boolean` | `true` | Show a browser overlay on build failure. |
+| `overlay` | `boolean` | `true` | Show a browser overlay (with a "Reload" button) on build failure. |
+| `reconnect` | `boolean` | `true` | Treat an SSE reconnect after a dropped connection as a fresh rebuild; `false` makes reconnection a no-op. |
 | `clientPath` | `string` | `"/__preview_watch"` | SSE endpoint path, relative to `base`. |
 | `logLevel` | `LogLevel` | `"warn"` | Log level of the background build. |
 | `clearScreen` | `boolean` | `false` | Let the background build clear the terminal. |

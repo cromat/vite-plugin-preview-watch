@@ -9,6 +9,7 @@ describe("resolveOptions", () => {
       clientPath: "/__preview_watch",
       logLevel: "warn",
       overlay: true,
+      reconnect: true,
       clearScreen: false,
       watch: {},
     });
@@ -55,5 +56,18 @@ describe("resolveOptions", () => {
   it("passes through onRebuild function", () => {
     const fn = () => {};
     expect(resolveOptions({ onRebuild: fn }).onRebuild).toBe(fn);
+  });
+
+  it("defaults reconnect to true", () => {
+    expect(resolveOptions().reconnect).toBe(true);
+    expect(resolveOptions({}).reconnect).toBe(true);
+  });
+
+  it("allows disabling reconnect", () => {
+    expect(resolveOptions({ reconnect: false }).reconnect).toBe(false);
+  });
+
+  it("passes through reconnect: true", () => {
+    expect(resolveOptions({ reconnect: true }).reconnect).toBe(true);
   });
 });
