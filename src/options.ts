@@ -63,6 +63,20 @@ export interface PreviewWatchOptions {
   overlay?: boolean;
 
   /**
+   * React when the SSE connection reconnects after a drop. When `true`, an
+   * `open` event that follows a dropped connection is treated as a fresh
+   * rebuild (auto-reload, or toast in `"manual"` mode), because the preview
+   * server may have restarted with a changed bundle while the tab was not
+   * listening. Set to `false` to make reconnection a no-op - useful when the
+   * preview server is restarted often on purpose (e.g. behind a supervisor)
+   * and you do not want those restarts to reload open tabs. Has no effect when
+   * {@link reload} is `false`.
+   *
+   * @default true
+   */
+  reconnect?: boolean;
+
+  /**
    * Let the background build clear the terminal on each rebuild. Off by default
    * so the preview server's own output stays visible.
    *
@@ -87,6 +101,7 @@ export interface ResolvedPreviewWatchOptions {
   clientPath: string;
   logLevel: LogLevel;
   overlay: boolean;
+  reconnect: boolean;
   clearScreen: boolean;
   watch: Rollup.WatcherOptions;
 }
@@ -107,6 +122,7 @@ export function resolveOptions(
     clientPath: "/" + clientPath.replace(/^\/+/, ""),
     logLevel: options.logLevel ?? "warn",
     overlay: options.overlay ?? true,
+    reconnect: options.reconnect ?? true,
     clearScreen: options.clearScreen ?? false,
     watch: options.watch ?? {},
   };

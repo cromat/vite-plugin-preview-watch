@@ -6,7 +6,7 @@ import type { Plugin, PreviewServer, Rollup } from "vite";
 import { joinClientUrl, renderClientScript } from "./client";
 import { resolveCorsHeaders, type PreviewCors } from "./cors";
 import { formatBuildError } from "./error";
-import { injectSnippet, resolveHtmlFile, stripBase } from "./inject";
+import { injectSnippet, isSpaAppType, resolveHtmlFile, stripBase } from "./inject";
 import { resolveOptions, type PreviewWatchOptions } from "./options";
 
 const PLUGIN_NAME = "vite-plugin-preview-watch";
@@ -45,7 +45,13 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
       const config = server.config;
       const base = config.base;
       const outDirAbs = resolve(config.root, config.build.outDir);
-      const isSpa = config.appType !== "mpa";
+      // Vite's appType is "spa" | "mpa" | "custom". Only "spa" (and the
+      // undefined default, which resolves to "spa") serves an index.html
+      // fallback for extensionless routes. "mpa" serves only explicit *.html,
+      // and "custom" does not serve HTML at all - Vite leaves it to the app -
+      // so we must not apply the SPA fallback there either. Both non-SPA cases
+      // are handled the same way: only explicit *.html requests are injected.
+      const isSpa = isSpaAppType(config.appType);
       // Configured preview response headers, minus undefined values (setHeader
       // and writeHead reject those).
       const previewHeaders: Record<string, string | number | string[]> = {};
@@ -134,6 +140,7 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
         const snippet = renderClientScript(
           joinClientUrl(base, opts.clientPath),
           opts.reload === "manual" ? "manual" : "auto",
+          opts.reconnect,
         );
 
         // SSE endpoint the injected client subscribes to.
