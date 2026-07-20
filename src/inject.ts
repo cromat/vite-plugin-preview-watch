@@ -17,6 +17,25 @@ export function stripBase(url: string, base: string): string | null {
 }
 
 /**
+ * Decide whether the plugin should serve an `index.html` SPA fallback for
+ * extensionless routes, based on Vite's resolved `appType`.
+ *
+ * Vite's `appType` is `"spa" | "mpa" | "custom"` (undefined resolves to the
+ * `"spa"` default). Only genuine SPAs get the fallback:
+ *
+ * - `"spa"` / `undefined` -> `true` (fallback extensionless routes to
+ *   `index.html`);
+ * - `"mpa"` -> `false` (only explicit `*.html`);
+ * - `"custom"` -> `false` (Vite serves no HTML itself; the app owns routing, so
+ *   an `index.html` fallback would be wrong).
+ *
+ * @param appType Vite's resolved `config.appType`.
+ */
+export function isSpaAppType(appType: string | undefined): boolean {
+  return appType !== "mpa" && appType !== "custom";
+}
+
+/**
  * Map a root-relative pathname to the on-disk HTML file that a preview request
  * would resolve to, or `null` if the request is not for an HTML document.
  *

@@ -58,4 +58,32 @@ describe("renderClientScript", () => {
     const script = renderClientScript("/__preview_watch", "auto");
     expect(script).toContain(`addEventListener("open"`);
   });
+
+  it("includes a reload button in the error overlay", () => {
+    const script = renderClientScript("/__preview_watch", "auto");
+    // Marker attribute the button carries.
+    expect(script).toContain("data-vite-preview-watch-reload");
+    // Created as a button element with a reload click handler.
+    expect(script).toContain(`createElement("button")`);
+    expect(script).toContain(`btn.addEventListener("click",()=>location.reload())`);
+    // Still no innerHTML anywhere (error text stays textContent).
+    expect(script).not.toContain("innerHTML");
+  });
+
+  it("defaults reconnect to true when omitted", () => {
+    const script = renderClientScript("/__preview_watch", "auto");
+    expect(script).toContain("reconnect=true");
+    // The open handler gates onFresh on the reconnect flag.
+    expect(script).toContain("wasOpen&&reconnect");
+  });
+
+  it("embeds reconnect=false when disabled", () => {
+    const script = renderClientScript("/__preview_watch", "auto", false);
+    expect(script).toContain("reconnect=false");
+  });
+
+  it("embeds reconnect=true when enabled explicitly", () => {
+    const script = renderClientScript("/__preview_watch", "auto", true);
+    expect(script).toContain("reconnect=true");
+  });
 });

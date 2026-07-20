@@ -25,6 +25,14 @@ const TOAST_STYLE =
   "font:13px/1.4 system-ui,sans-serif;border:1px solid #3c3c44;" +
   "border-radius:8px;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,.4);";
 
+// Small "Reload" button pinned to the top-right corner of the error overlay.
+// Kept dark and monospace to match the overlay itself.
+const RELOAD_BUTTON_STYLE =
+  "position:absolute;top:12px;right:12px;padding:4px 10px;" +
+  "background:#2a2a2e;color:#e2e2e6;" +
+  "font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;" +
+  "border:1px solid #4a4a52;border-radius:6px;cursor:pointer;";
+
 /**
  * Render the inline script injected into served HTML. It opens an EventSource
  * to the plugin's SSE endpoint and reacts to:
@@ -37,18 +45,32 @@ const TOAST_STYLE =
  *   event, which fires on connection drops);
  * - reconnection (an `open` after the connection previously dropped): the
  *   server restarted and the bundle may have changed while we were not
- *   listening - reload in `auto` mode, toast in `manual` mode.
+ *   listening - reload in `auto` mode, toast in `manual` mode. Disabled when
+ *   `reconnect` is `false`, so a deliberately restarted preview server does not
+ *   trigger reloads.
  *
- * `textContent` is used for all rendered text so build output can never inject
- * HTML into the page. EventSource reconnects on its own, so no manual retry
- * logic is needed.
+ * The build-error overlay carries a small "Reload" button in its corner
+ * (`data-vite-preview-watch-reload`) so the user can force a reload without the
+ * DevTools console. The error text itself stays `textContent` (never
+ * `innerHTML`) so build output can never inject HTML into the page. EventSource
+ * reconnects on its own, so no manual retry logic is needed.
+ *
+ * @param url       Absolute URL of the SSE endpoint.
+ * @param mode      Client behaviour on a successful rebuild.
+ * @param reconnect Whether an `open` after a dropped connection should reload
+ *                  (or toast). Defaults to `true`.
  */
-export function renderClientScript(url: string, mode: ClientMode): string {
+export function renderClientScript(
+  url: string,
+  mode: ClientMode,
+  reconnect = true,
+): string {
   return (
     `<script type="module">` +
     `(()=>{` +
     `const s=new EventSource(${JSON.stringify(url)});` +
     `const manual=${JSON.stringify(mode === "manual")};` +
+    `const reconnect=${JSON.stringify(reconnect)};` +
     `let box,toast,wasOpen=false;` +
     `const clearBox=()=>{if(box){box.remove();box=null;}};` +
     `const clearToast=()=>{if(toast){toast.remove();toast=null;}};` +
@@ -64,7 +86,7 @@ export function renderClientScript(url: string, mode: ClientMode): string {
     `};` +
     `const onFresh=()=>{if(manual){clearBox();showToast();}else{location.reload();}};` +
     `s.addEventListener("reload",onFresh);` +
-    `s.addEventListener("open",()=>{if(wasOpen)onFresh();wasOpen=true;});` +
+    `s.addEventListener("open",()=>{if(wasOpen&&reconnect)onFresh();wasOpen=true;});` +
     `s.addEventListener("build-error",(e)=>{` +
     `clearBox();clearToast();` +
     `let msg="Build failed";try{msg=JSON.parse(e.data).message||msg;}catch(_){}` +
@@ -72,6 +94,12 @@ export function renderClientScript(url: string, mode: ClientMode): string {
     `box.setAttribute("data-vite-preview-watch-error","");` +
     `box.style.cssText=${JSON.stringify(OVERLAY_STYLE)};` +
     `box.textContent=msg;` +
+    `const btn=document.createElement("button");` +
+    `btn.setAttribute("data-vite-preview-watch-reload","");` +
+    `btn.style.cssText=${JSON.stringify(RELOAD_BUTTON_STYLE)};` +
+    `btn.textContent="Reload";` +
+    `btn.addEventListener("click",()=>location.reload());` +
+    `box.appendChild(btn);` +
     `root().appendChild(box);` +
     `});` +
     `})();` +
