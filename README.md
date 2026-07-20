@@ -1,5 +1,7 @@
 # vite-plugin-preview-watch
 
+[![npm](https://img.shields.io/npm/v/vite-plugin-preview-watch)](https://www.npmjs.com/package/vite-plugin-preview-watch)
+
 Watch mode for `vite preview`. It rebuilds your production bundle whenever the
 source changes and full-page reloads any open preview tabs, so the build you are
 previewing stays fresh - no manual `vite build` + refresh loop.
