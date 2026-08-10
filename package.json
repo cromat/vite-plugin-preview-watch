@@ -20,6 +20,9 @@
   "bugs": "https://github.com/andrzej-stepien/vite-plugin-preview-watch/issues",
   "type": "module",
   "sideEffects": false,
+  "dependencies": {
+    "chokidar": "^4.0.3"
+  },
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",

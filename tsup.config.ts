@@ -11,6 +11,6 @@ export default defineConfig({
   outExtension({ format }) {
     return { js: format === "cjs" ? ".cjs" : ".js" };
   },
-  // vite is a peer dependency and must never be bundled.
-  external: ["vite"],
+  // Vite is a peer dependency; Chokidar is installed alongside this package.
+  external: ["vite", "chokidar"],
 });

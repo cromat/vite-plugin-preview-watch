@@ -85,10 +85,13 @@ export interface PreviewWatchOptions {
   clearScreen?: boolean;
 
   /**
-   * Rollup watch options forwarded to the background build (e.g. `exclude`,
-   * `chokidar`). Merged into `build.watch`.
+   * Source watch options: `buildDelay`, `include`, `exclude`, `onInvalidate`,
+   * and `chokidar` are honored. Unless specified here, rebuilds are debounced
+   * by 100 ms so the watcher reads completed file saves. Other Rollup-only
+   * watch options have no effect because the plugin runs a separate fresh build
+   * to write preview output.
    *
-   * @default {}
+   * @default { buildDelay: 100 }
    */
   watch?: Rollup.WatcherOptions;
 }

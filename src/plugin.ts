@@ -1,7 +1,9 @@
 ﻿import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ServerResponse } from "node:http";
-import { build } from "vite";
+import { watch as watchFiles } from "chokidar";
+import type { Matcher } from "chokidar";
+import { build, createFilter } from "vite";
 import type { Plugin, PreviewServer, Rollup } from "vite";
 import { joinClientUrl, renderClientScript } from "./client";
 import { resolveCorsHeaders, type PreviewCors } from "./cors";
@@ -10,6 +12,15 @@ import { injectSnippet, isSpaAppType, resolveHtmlFile, stripBase } from "./injec
 import { resolveOptions, type PreviewWatchOptions } from "./options";
 
 const PLUGIN_NAME = "vite-plugin-preview-watch";
+// Some editors and framework tooling update a file through several filesystem
+// events. Starting Rollup immediately on the first event can make it read the
+// previous version while the save is still settling. Keep the delay short so
+// normal edits remain responsive, but debounce that burst into one rebuild.
+const DEFAULT_BUILD_DELAY_MS = 100;
+
+function toArray<T>(value: T | T[] | null | undefined): T[] {
+  return value == null ? [] : Array.isArray(value) ? value : [value];
+}
 
 /**
  * Vite plugin that adds a watch mode to `vite preview`: it rebuilds the output
@@ -60,18 +71,48 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
       }
 
       // ---- background rebuild -------------------------------------------
-      // Re-run the production build in watch mode. This writes into the same
-      // outDir the preview server serves from, so every source change lands in
-      // the served bundle.
-      const watcher = (await build({
+      // Watch the source tree directly instead of relying on Rollup's module
+      // watch graph. Framework plugins can use external templates or styles
+      // without registering them during `vite build --watch`; that means an
+      // edit is missed until another watched file changes. Each settled change
+      // runs a fresh one-off Vite build, avoiding persistent plugin-instance
+      // caches as well.
+      //
+      // `buildDelay` is retained as the debounce interval. Respect an explicit
+      // value (including `0`) supplied by the caller.
+      const watchOptions: Rollup.WatcherOptions = {
+        ...opts.watch,
+        buildDelay: opts.watch.buildDelay ?? DEFAULT_BUILD_DELAY_MS,
+      };
+      const buildConfig = {
         root: config.root,
         base,
         mode: config.mode,
         configFile: config.configFile,
         logLevel: opts.logLevel,
         clearScreen: opts.clearScreen,
-        build: { watch: opts.watch },
-      })) as Rollup.RollupWatcher;
+      };
+      const fileFilter = createFilter(
+        watchOptions.include,
+        watchOptions.exclude,
+        { resolve: config.root },
+      );
+      const cacheDirAbs = resolve(config.root, config.cacheDir);
+      const configFiles = [
+        ...new Set([
+          ...(config.configFileDependencies ?? []),
+          ...(config.configFile ? [config.configFile] : []),
+        ]),
+      ];
+      const ignored: Matcher[] = [
+        "**/.git/**",
+        "**/node_modules/**",
+        outDirAbs,
+        `${outDirAbs}/**`,
+        cacheDirAbs,
+        `${cacheDirAbs}/**`,
+        ...toArray(watchOptions.chokidar?.ignored as Matcher | Matcher[] | undefined),
+      ];
 
       // ---- reload wiring -------------------------------------------------
       const clients = new Set<ServerResponse>();
@@ -83,57 +124,117 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
         }
       };
 
-      // Rollup emits END after EVERY cycle, including a failed one (ERROR is
-      // followed by END), so END alone must not be treated as success - that
-      // would immediately reload away the error overlay and re-serve the stale
-      // bundle. Track failures per cycle instead.
-      let buildFailed = false;
-      let cycleStart = 0;
-      let lastError: unknown = null;
-      watcher.on("event", (event) => {
-        switch (event.code) {
-          case "START":
-            buildFailed = false;
-            lastError = null;
-            cycleStart = Date.now();
-            break;
-          case "BUNDLE_END":
-            // Per rollup docs: close the result so build plugins get their
-            // closeBundle hooks promptly instead of at watcher.close().
-            void event.result?.close();
-            break;
-          case "ERROR":
-            buildFailed = true;
-            lastError = event.error;
-            // ERROR events can also carry a (partial) build result to close.
-            void event.result?.close();
-            // Keep the preview alive and surface the failure in the browser.
-            // Vite still logs the full error to the terminal itself.
-            if (opts.reload && opts.overlay) {
-              send("build-error", { message: formatBuildError(event.error) });
-            }
-            break;
-          case "END":
-            // Successful (re)build: reload, which also clears any overlay. In
-            // manual mode we still emit "reload" - the client shows a toast
-            // instead of reloading, so the decision stays client-side.
-            if (opts.reload && !buildFailed) send("reload");
-            // Fire the server-side hook after every cycle, regardless of the
-            // reload setting. A user exception here must not take down the
-            // preview server.
-            if (opts.onRebuild) {
-              try {
-                opts.onRebuild({
-                  ok: !buildFailed,
-                  error: buildFailed ? lastError : null,
-                  durationMs: Date.now() - cycleStart,
-                });
-              } catch (err) {
-                console.error(`[${PLUGIN_NAME}] onRebuild threw:`, err);
-              }
-            }
-            break;
+      let closed = false;
+      let rebuildQueued = false;
+      let rebuilding = false;
+      let queuedVersion = 0;
+      let invalidationVersion = 0;
+      let rebuildTimer: ReturnType<typeof setTimeout> | undefined;
+      let finishInitialBuild: (() => void) | undefined;
+      const initialBuildFinished = new Promise<void>((resolve) => {
+        finishInitialBuild = resolve;
+      });
+
+      const notifyRebuild = (ok: boolean, error: unknown, durationMs: number): void => {
+        if (!opts.onRebuild) return;
+        try {
+          opts.onRebuild({ ok, error, durationMs });
+        } catch (err) {
+          console.error(`[${PLUGIN_NAME}] onRebuild threw:`, err);
         }
+      };
+
+      const rebuild = async (version: number): Promise<boolean> => {
+        if (closed || version !== invalidationVersion) return false;
+        const startedAt = Date.now();
+        try {
+          // `false` (rather than `null`) overrides a build.watch value from
+          // the project's config, ensuring this is always a one-off build.
+          // Vite accepts `false` at runtime, though its public BuildOptions
+          // type only declares an object or null for this field.
+          await build({
+            ...buildConfig,
+            build: { watch: false as unknown as Rollup.WatcherOptions },
+          });
+          const isCurrent = !closed && version === invalidationVersion;
+          if (isCurrent && opts.reload) send("reload");
+          if (isCurrent) notifyRebuild(true, null, Date.now() - startedAt);
+          return isCurrent;
+        } catch (error) {
+          const isCurrent = !closed && version === invalidationVersion;
+          if (isCurrent && opts.reload && opts.overlay) {
+            send("build-error", { message: formatBuildError(error) });
+          }
+          if (isCurrent) notifyRebuild(false, error, Date.now() - startedAt);
+          return isCurrent;
+        }
+      };
+
+      const runQueuedRebuilds = async (): Promise<void> => {
+        if (rebuilding) return;
+        rebuilding = true;
+        try {
+          while (rebuildQueued && !closed) {
+            const version = queuedVersion;
+            rebuildQueued = false;
+            if (await rebuild(version)) {
+              finishInitialBuild?.();
+              finishInitialBuild = undefined;
+            }
+          }
+        } finally {
+          rebuilding = false;
+        }
+      };
+
+      const queueRebuild = (version: number): void => {
+        if (closed) return;
+        queuedVersion = version;
+        rebuildQueued = true;
+        void runQueuedRebuilds();
+      };
+
+      const scheduleRebuild = (path: string): void => {
+        if (!fileFilter(path) || closed) return;
+        invalidationVersion += 1;
+        try {
+          watchOptions.onInvalidate?.(path);
+        } catch (error) {
+          console.error(`[${PLUGIN_NAME}] watch.onInvalidate threw:`, error);
+        }
+        if (rebuildTimer) clearTimeout(rebuildTimer);
+        rebuildTimer = setTimeout(() => {
+          rebuildTimer = undefined;
+          queueRebuild(invalidationVersion);
+        }, Math.max(0, watchOptions.buildDelay ?? DEFAULT_BUILD_DELAY_MS));
+      };
+
+      const sourceWatcher = watchFiles(
+        [config.root, ...configFiles],
+        {
+          ...watchOptions.chokidar,
+          ignored,
+          ignoreInitial: true,
+          ignorePermissionErrors: true,
+          persistent: true,
+        },
+      );
+      const sourceWatcherReady = new Promise<void>((resolveReady) => {
+        sourceWatcher.once("ready", resolveReady);
+      });
+      sourceWatcher.on("all", (event, path) => {
+        if (
+          event === "add" ||
+          event === "addDir" ||
+          event === "change" ||
+          event === "unlink" ||
+          event === "unlinkDir"
+        ) {
+          scheduleRebuild(path);
+        }
+      });
+      sourceWatcher.on("error", (error) => {
+        console.error(`[${PLUGIN_NAME}] source watcher error:`, error);
       });
 
       if (opts.reload) {
@@ -214,11 +315,24 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
 
       // ---- teardown ------------------------------------------------------
       const close = (): void => {
-        void watcher.close();
+        closed = true;
+        if (rebuildTimer) clearTimeout(rebuildTimer);
+        rebuildTimer = undefined;
+        void sourceWatcher.close();
         for (const client of clients) client.end();
         clients.clear();
+        finishInitialBuild?.();
+        finishInitialBuild = undefined;
       };
       server.httpServer.once("close", close);
+
+      // Do not begin the initial output build until Chokidar has completed its
+      // initial scan. Any source save during that scan is then read by the
+      // initial build rather than being accidentally treated as an ignored
+      // initial file event.
+      await sourceWatcherReady;
+      queueRebuild(invalidationVersion);
+      await initialBuildFinished;
     },
   };
 }

@@ -14,7 +14,8 @@ right tool; this plugin is deliberately about the production build.
 Implements the long-standing request in
 [vitejs/vite#5196](https://github.com/vitejs/vite/issues/5196) as a plugin.
 
-- Zero runtime dependencies (`vite` is a peer dependency).
+- Uses one small runtime dependency (`chokidar`) to watch all project files,
+  including framework-managed templates and styles.
 - Full-page reload over Server-Sent Events - no client library to install.
 - Build failures surface as a full-screen overlay in the browser instead of
   silently leaving the stale bundle on screen.
@@ -54,8 +55,13 @@ Edit a source file and the preview reloads once the rebuild finishes.
 
 On `vite preview` startup the plugin:
 
-1. Starts a background `vite build` in Rollup watch mode, writing into the same
-   `outDir` the preview server serves from.
+1. Starts a background Chokidar watcher over the project source tree, including
+   external templates and styles that a framework plugin may not register with
+   Rollup. After each settled source change, it runs a fresh `vite build` into
+   the same `outDir` the preview server serves from. Using a fresh build avoids
+   persistent framework plugin caches returning the preceding version of a
+   template. Preview startup waits for the first output build, so it cannot
+   race the first edit you make.
 2. Registers a Server-Sent Events endpoint and injects a tiny client script into
    served HTML documents.
 3. On every successful rebuild, pushes a `reload` event. In the default
@@ -124,7 +130,10 @@ previewWatch({
   // Let the background build clear the terminal on each rebuild.
   clearScreen: false,
 
-  // Rollup watch options forwarded to build.watch (e.g. exclude globs).
+  // Source watch options: buildDelay, include, exclude, onInvalidate, and
+  // chokidar are honored. The plugin debounces rebuilds by 100 ms by default
+  // so it reads completed saves; set buildDelay explicitly (including 0) to
+  // override that. Other Rollup-only watch options have no effect.
   watch: {},
 });
 ```
@@ -138,14 +147,15 @@ previewWatch({
 | `clientPath` | `string` | `"/__preview_watch"` | SSE endpoint path, relative to `base`. |
 | `logLevel` | `LogLevel` | `"warn"` | Log level of the background build. |
 | `clearScreen` | `boolean` | `false` | Let the background build clear the terminal. |
-| `watch` | `Rollup.WatcherOptions` | `{}` | Forwarded to `build.watch`. |
+| `watch` | `Rollup.WatcherOptions` | `{ buildDelay: 100 }` | Controls the source watcher; `buildDelay`, `include`, `exclude`, `onInvalidate`, and `chokidar` are honored. The default delay coalesces a save's filesystem-event burst. |
 
 ## Limitations
 
 - The reload is a **full page reload**, not HMR. That is intentional - the point
   is to reflect the production build faithfully.
-- Rebuilds run the full Rollup production build, so they are slower than dev-mode
-  HMR. That is the cost of previewing the real bundle.
+- Rebuilds run a fresh Rollup production build, so they are slower than dev-mode
+  HMR. That is the cost of previewing the real bundle without stale framework
+  compilation caches.
 - Client injection targets HTML documents served from `outDir` (SPA index
   fallback and explicit `*.html` for MPA). Unusual `base`/`appType` setups may
   need `clientPath` tuning.
