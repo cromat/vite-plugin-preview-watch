@@ -1,10 +1,15 @@
-# vite-plugin-preview-watch
+# vite-plugin-preview-xwatch
 
-[![npm](https://img.shields.io/npm/v/vite-plugin-preview-watch)](https://www.npmjs.com/package/vite-plugin-preview-watch)
+[![npm](https://img.shields.io/npm/v/vite-plugin-preview-xwatch)](https://www.npmjs.com/package/vite-plugin-preview-xwatch)
 
 Watch mode for `vite preview`. It rebuilds your production bundle whenever the
 source changes and full-page reloads any open preview tabs, so the build you are
 previewing stays fresh - no manual `vite build` + refresh loop.
+
+This project is an extended version of the original
+[vite-plugin-preview-watch](https://github.com/andrzej-stepien/vite-plugin-preview-watch),
+with broader source-file detection and fresh builds that avoid stale framework
+template output.
 
 Use it when you specifically want to look at the **production** output (minified
 assets, real `base`, hashed filenames, service worker, SSR/edge output) while
@@ -25,7 +30,7 @@ Implements the long-standing request in
 ## Install
 
 ```sh
-npm install --save-dev --ignore-scripts vite-plugin-preview-watch
+npm install --save-dev --ignore-scripts vite-plugin-preview-xwatch
 ```
 
 Requires Vite 4 or newer.
@@ -35,7 +40,7 @@ Requires Vite 4 or newer.
 ```ts
 // vite.config.ts
 import { defineConfig } from "vite";
-import { previewWatch } from "vite-plugin-preview-watch";
+import { previewWatch } from "vite-plugin-preview-xwatch";
 
 export default defineConfig({
   plugins: [previewWatch()],

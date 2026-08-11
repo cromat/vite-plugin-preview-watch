@@ -58,7 +58,7 @@ describe("previewWatch (plugin shape)", () => {
 
   it("returns a named vite plugin", () => {
     const plugin = previewWatch();
-    expect(plugin.name).toBe("vite-plugin-preview-watch");
+    expect(plugin.name).toBe("vite-plugin-preview-xwatch");
   });
 
   it("only applies on the serve command", () => {

@@ -11,7 +11,7 @@ import { formatBuildError } from "./error";
 import { injectSnippet, isSpaAppType, resolveHtmlFile, stripBase } from "./inject";
 import { resolveOptions, type PreviewWatchOptions } from "./options";
 
-const PLUGIN_NAME = "vite-plugin-preview-watch";
+const PLUGIN_NAME = "vite-plugin-preview-xwatch";
 // Some editors and framework tooling update a file through several filesystem
 // events. Starting Rollup immediately on the first event can make it read the
 // previous version while the save is still settling. Keep the delay short so
@@ -35,7 +35,7 @@ function toArray<T>(value: T | T[] | null | undefined): T[] {
  * ```ts
  * // vite.config.ts
  * import { defineConfig } from "vite";
- * import { previewWatch } from "vite-plugin-preview-watch";
+ * import { previewWatch } from "vite-plugin-preview-xwatch";
  *
  * export default defineConfig({
  *   plugins: [previewWatch()],
