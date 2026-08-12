@@ -13,10 +13,10 @@ import { resolveOptions, type PreviewWatchOptions } from "./options";
 
 const PLUGIN_NAME = "vite-plugin-preview-xwatch";
 // Some editors and framework tooling update a file through several filesystem
-// events. Starting Rollup immediately on the first event can make it read the
-// previous version while the save is still settling. Keep the delay short so
-// normal edits remain responsive, but debounce that burst into one rebuild.
+// events. Keep the delay short so normal edits remain responsive, but debounce
+// that burst into one rebuild after the save has settled.
 const DEFAULT_BUILD_DELAY_MS = 100;
+const IGNORED_DIRECTORY_SEGMENT = /(?:^|[/\\])(?:\.git|node_modules)(?:[/\\]|$)/;
 
 function toArray<T>(value: T | T[] | null | undefined): T[] {
   return value == null ? [] : Array.isArray(value) ? value : [value];
@@ -105,12 +105,19 @@ export function previewWatch(options: PreviewWatchOptions = {}): Plugin {
         ]),
       ];
       const ignored: Matcher[] = [
-        "**/.git/**",
-        "**/node_modules/**",
-        outDirAbs,
-        `${outDirAbs}/**`,
-        cacheDirAbs,
-        `${cacheDirAbs}/**`,
+        // Chokidar 4 removed glob support. Use native matchers so Vite's
+        // temporary ESM config files under node_modules/.vite-temp are truly
+        // ignored; otherwise every vite.config.mts load triggers another build.
+        (path) => IGNORED_DIRECTORY_SEGMENT.test(path),
+        { path: outDirAbs, recursive: true },
+        { path: cacheDirAbs, recursive: true },
+        // Vite falls back to writing this beside an ESM config when it cannot
+        // find a writable node_modules directory.
+        (path) =>
+          configFiles.some(
+            (configFile) =>
+              path.startsWith(`${configFile}.timestamp-`) && path.endsWith(".mjs"),
+          ),
         ...toArray(watchOptions.chokidar?.ignored as Matcher | Matcher[] | undefined),
       ];
 

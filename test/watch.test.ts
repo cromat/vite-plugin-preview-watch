@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -297,6 +297,65 @@ export default {
       if (!scriptPath) throw new Error("Expected built JavaScript entry in index.html");
       const output = await readFile(join(root, "dist", scriptPath), "utf8");
       expect(output).toContain("latest template");
+    } finally {
+      close?.();
+    }
+  });
+
+  it("does not loop when Vite loads an ESM vite.config.mts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "preview-watch-"));
+    fixtures.push(root);
+    const configPath = join(root, "vite.config.mts");
+    await writeFile(join(root, "index.html"), "<p>config mts</p>");
+    await writeFile(configPath, "export default {};\n");
+    // Vite writes bundled ESM configs to node_modules/.vite-temp when this
+    // directory is available, which is the normal installed-project case.
+    await mkdir(join(root, "node_modules"));
+
+    let completedBuilds = 0;
+    const buildErrors: unknown[] = [];
+    let close: (() => void) | undefined;
+    const plugin = previewWatch({
+      logLevel: "silent",
+      reload: false,
+      watch: { buildDelay: 0 },
+      onRebuild: ({ error, ok }) => {
+        if (ok) completedBuilds += 1;
+        else buildErrors.push(error);
+      },
+    });
+    const hook = plugin.configurePreviewServer;
+    if (!hook) throw new Error("Expected configurePreviewServer hook");
+    const configurePreviewServer = typeof hook === "function" ? hook : hook.handler;
+
+    const configuring = configurePreviewServer({
+      config: {
+        appType: "spa",
+        base: "/",
+        build: { outDir: "dist" },
+        cacheDir: join(root, "node_modules", ".vite"),
+        configFile: configPath,
+        configFileDependencies: [configPath],
+        mode: "production",
+        preview: {},
+        root,
+      },
+      httpServer: {
+        once: (_event: string, listener: () => void) => {
+          close = listener;
+        },
+      },
+      middlewares: { use: () => undefined },
+    } as never);
+
+    try {
+      await withTimeout(Promise.resolve(configuring));
+      // Leave enough time for an accidentally observed config temp file to
+      // schedule multiple zero-delay builds.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      expect(buildErrors).toEqual([]);
+      expect(completedBuilds).toBe(1);
     } finally {
       close?.();
     }
